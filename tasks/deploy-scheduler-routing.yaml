@@ -1,0 +1,56 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: deploy-scheduler-routing
+spec:
+  params:
+    - name: scheduler-image
+    - name: sidecar-image
+  steps:
+    - name: deploy
+      image: quay.io/openshift/origin-cli:latest
+      script: |
+        oc apply -f - <<EOF
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: scheduler
+        spec:
+          replicas: 1
+          selector:
+            matchLabels:
+              app: scheduler
+          template:
+            metadata:
+              labels:
+                app: scheduler
+            spec:
+              containers:
+              - name: scheduler
+                image: $(params.scheduler-image)
+                ports:
+                  - containerPort: 8080
+        ---
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: routing-sidecar
+        spec:
+          replicas: 1
+          selector:
+            matchLabels:
+              app: routing-sidecar
+          template:
+            metadata:
+              labels:
+                app: routing-sidecar
+            spec:
+              containers:
+              - name: routing-sidecar
+                image: $(params.sidecar-image)
+                env:
+                  - name: SCHEDULER_HOST
+                    value: "http://scheduler:8080"
+                ports:
+                  - containerPort: 8090
+        EOF

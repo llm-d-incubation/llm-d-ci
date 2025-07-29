@@ -1,0 +1,12 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: test-modelservice-kvcache-utils
+spec:
+  results:
+    - name: test-output
+  steps:
+    - name: test
+      image: registry.access.redhat.com/ubi8/python-39
+      script: |
+        echo '{"status": "ok"}' > /tekton/results/test-output

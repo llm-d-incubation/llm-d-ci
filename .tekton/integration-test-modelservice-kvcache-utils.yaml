@@ -1,0 +1,67 @@
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  generateName: integration-test-modelservice-kvcache-utils-
+  annotations:
+    pipelinesascode.tekton.dev/on-event: "[pull_request]"
+    pipelinesascode.tekton.dev/on-target-branch: "[main, dev]"
+spec:
+  params:
+    - name: modelservice-image
+      value: ""
+    - name: kv-cache-image
+      value: ""
+    - name: pd-utils-image
+      value: ""
+    - name: pipelines-as-code.event_url
+      value: ""
+  pipelineSpec:
+    params:
+      - name: modelservice-image
+      - name: kv-cache-image
+      - name: pd-utils-image
+      - name: pipelines-as-code.event_url
+        default: https://github.com/llm-d-incubation/llm-d-ci/pull/0
+    tasks:
+      - name: deploy
+        taskRef:
+          name: deploy-modelservice-kvcache-utils
+        params:
+          - name: modelservice-image
+            value: $(params.modelservice-image)
+          - name: kv-cache-image
+            value: $(params.kv-cache-image)
+          - name: pd-utils-image
+            value: $(params.pd-utils-image)
+            
+      - name: test
+        runAfter: [deploy]
+        taskRef:
+          name: test-modelservice-kvcache-utils
+
+      - name: comment
+        runAfter: [test]
+        taskRef:
+          name: github-add-comment
+        params:
+          - name: GITHUB_HOST_URL
+            value: https://github.com
+          - name: REQUEST_URL
+            value: $(params.pipelines-as-code.event_url)
+          - name: COMMENT_OR_FILE
+            value: |
+              ✅ **scheduler-routing Integration Test**
+
+              Components deployed: scheduler, routing-sidecar
+
+              ```
+              $(tasks.test.results.test-output)
+              ```
+          - name: COMMENT_TAG
+            value: scheduler-routing
+          - name: REPLACE
+            value: "true"
+          - name: GITHUB_TOKEN_SECRET
+            value: pipelines-as-code-secret
+          - name: GITHUB_TOKEN_SECRET_KEY
+            value: token

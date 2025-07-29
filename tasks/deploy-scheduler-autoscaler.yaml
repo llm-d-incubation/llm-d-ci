@@ -1,0 +1,51 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: deploy-scheduler-autoscaler
+spec:
+  params:
+    - name: scheduler-image
+    - name: autoscaler-image
+  steps:
+    - name: deploy
+      image: quay.io/openshift/origin-cli:latest
+      script: |
+        oc apply -f - <<EOF
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: scheduler
+        spec:
+          replicas: 1
+          selector:
+            matchLabels:
+              app: scheduler
+          template:
+            metadata:
+              labels:
+                app: scheduler
+            spec:
+              containers:
+              - name: scheduler
+                image: $(params.scheduler-image)
+                ports:
+                  - containerPort: 8080
+        ---
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: autoscaler
+        spec:
+          replicas: 1
+          selector:
+            matchLabels:
+              app: autoscaler
+          template:
+            metadata:
+              labels:
+                app: autoscaler
+            spec:
+              containers:
+              - name: autoscaler
+                image: $(params.autoscaler-image)
+        EOF

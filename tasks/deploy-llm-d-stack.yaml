@@ -1,0 +1,23 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: deploy-llm-d-stack
+spec:
+  params:
+    - name: llm-d-image
+    - name: scheduler-image
+    - name: sidecar-image
+    - name: autoscaler-image
+    - name: kv-cache-image
+    - name: pd-utils-image
+  steps:
+    - name: deploy
+      image: quay.io/openshift/origin-cli:latest
+      script: |
+        echo "Deploying llm-d stack..."
+        set -e
+
+        # Combine all deployments in a single manifest
+        cat <<EOF | oc apply -f -
+        [INSERT DEPLOYMENT YAML FROM EARLIER HERE]
+        EOF

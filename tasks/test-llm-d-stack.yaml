@@ -1,0 +1,24 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: test-llm-d-stack
+spec:
+  results:
+    - name: test-output
+  steps:
+    - name: test
+      image: registry.access.redhat.com/ubi8/python-39
+      script: |
+        sleep 20
+        echo "Running inference via routing-sidecar..."
+        output=$(curl -s -X POST http://routing-sidecar:8090/inference \
+          -H "Content-Type: application/json" \
+          -d '{"input": "Say hello"}')
+        echo "$output" | tee /tekton/results/test-output
+
+        if echo "$output" | grep -q '"status": "ok"'; then
+          echo "Test passed"
+        else
+          echo "Test failed"
+          exit 1
+        fi
