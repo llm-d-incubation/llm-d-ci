@@ -1,0 +1,70 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: deploy-modelservice-kvcache-utils
+spec:
+  params:
+    - name: modelservice-image
+    - name: kv-cache-image
+    - name: pd-utils-image
+  steps:
+    - name: deploy
+      image: quay.io/openshift/origin-cli:latest
+      script: |
+        oc apply -f - <<EOF
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: modelservice
+        spec:
+          replicas: 1
+          selector:
+            matchLabels:
+              app: modelservice
+          template:
+            metadata:
+              labels:
+                app: modelservice
+            spec:
+              containers:
+              - name: modelservice
+                image: $(params.modelservice-image)
+                ports:
+                  - containerPort: 8081
+        ---
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: kv-cache
+        spec:
+          replicas: 1
+          selector:
+            matchLabels:
+              app: kv-cache
+          template:
+            metadata:
+              labels:
+                app: kv-cache
+            spec:
+              containers:
+              - name: kv-cache
+                image: $(params.kv-cache-image)
+        ---
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: pd-utils
+        spec:
+          replicas: 1
+          selector:
+            matchLabels:
+              app: pd-utils
+          template:
+            metadata:
+              labels:
+                app: pd-utils
+            spec:
+              containers:
+              - name: pd-utils
+                image: $(params.pd-utils-image)
+        EOF

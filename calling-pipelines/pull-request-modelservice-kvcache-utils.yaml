@@ -1,0 +1,17 @@
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  generateName: modelservice-kvcache-utils-test-
+  annotations:
+    pipelinesascode.tekton.dev/on-event: "[pull_request]"
+    pipelinesascode.tekton.dev/on-target-branch: "[main, dev]"
+    pipelinesascode.tekton.dev/repo: "https://github.com/llm-d-incubation/llm-d-ci@main"
+    pipelinesascode.tekton.dev/pipelinerun: ".tekton/integration-test-modelservice-kvcache-utils.yaml"
+spec:
+  params:
+    - name: modelservice-image
+      value: "quay.io/llmd/llm-d-modelservice:pr-$(context.pipelineRun.pullRequest.number)"
+    - name: kv-cache-image
+      value: "quay.io/llmd/llm-d-kv-cache-manager:pr-$(context.pipelineRun.pullRequest.number)"
+    - name: pd-utils-image
+      value: "quay.io/llmd/llm-d-pd-utils:pr-$(context.pipelineRun.pullRequest.number)"

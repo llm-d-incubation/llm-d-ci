@@ -1,0 +1,15 @@
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  generateName: scheduler-routing-test-
+  annotations:
+    pipelinesascode.tekton.dev/on-event: "[pull_request]"
+    pipelinesascode.tekton.dev/on-target-branch: "[main, dev]"
+    pipelinesascode.tekton.dev/repo: "https://github.com/llm-d-incubation/llm-d-ci@main"
+    pipelinesascode.tekton.dev/pipelinerun: ".tekton/integration-test-scheduler-routing.yaml"
+spec:
+  params:
+    - name: scheduler-image
+      value: "quay.io/llmd/llm-d-inference-scheduler:pr-$(context.pipelineRun.pullRequest.number)"
+    - name: sidecar-image
+      value: "quay.io/llmd/llm-d-routing-sidecar:pr-$(context.pipelineRun.pullRequest.number)"

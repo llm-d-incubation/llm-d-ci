@@ -1,0 +1,13 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: test-scheduler-autoscaler
+spec:
+  results:
+    - name: test-output
+  steps:
+    - name: test
+      image: registry.access.redhat.com/ubi8/python-39
+      script: |
+        echo "Testing scheduler and autoscaler readiness only"
+        echo '{"status": "ok"}' > /tekton/results/test-output

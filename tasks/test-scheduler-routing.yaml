@@ -1,0 +1,15 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: test-scheduler-routing
+spec:
+  results:
+    - name: test-output
+  steps:
+    - name: test
+      image: registry.access.redhat.com/ubi8/python-39
+      script: |
+        sleep 10
+        output=$(curl -s -X POST http://routing-sidecar:8090/inference -H "Content-Type: application/json" -d '{"input": "ping"}')
+        echo "$output" | tee /tekton/results/test-output
+        echo "$output" | grep -q '"status": "ok"' || exit 1
