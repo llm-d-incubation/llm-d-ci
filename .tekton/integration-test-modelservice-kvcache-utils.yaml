@@ -13,15 +13,15 @@ spec:
       value: ""
     - name: pd-utils-image
       value: ""
-    - name: pipelines-as-code.event_url
+    - name: pac_event_url
       value: ""
   pipelineSpec:
     params:
       - name: modelservice-image
       - name: kv-cache-image
       - name: pd-utils-image
-      - name: pipelines-as-code.event_url
-        default: https://github.com/llm-d-incubation/llm-d-ci/pull/0
+      - name: pac_event_url
+        default: https://github.com/llm-d-incubation/llm-d-ci/pull/1
     tasks:
       - name: deploy
         taskRef:
@@ -47,7 +47,7 @@ spec:
           - name: GITHUB_HOST_URL
             value: https://github.com
           - name: REQUEST_URL
-            value: $(params.pipelines-as-code.event_url)
+            value: $(params.pac_event_url)
           - name: COMMENT_OR_FILE
             value: |
               ✅ **scheduler-routing Integration Test**
