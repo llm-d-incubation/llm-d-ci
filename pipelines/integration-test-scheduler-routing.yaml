@@ -6,9 +6,9 @@ metadata:
     build.appstudio.redhat.com/pipeline: "scheduler-routing"
 spec:
   params:
-    - name: scheduler-image
+    - name: llm-d-inference-scheduler-d79d9-image
       type: string
-    - name: sidecar-image
+    - name: llm-d-routing-sidecar-b03d5
       type: string
 
   results:
