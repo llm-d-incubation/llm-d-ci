@@ -210,6 +210,8 @@ spec:
             script: |
               #!/bin/bash
               set -e
+              dnf -y install jq
+
               echo "Evaluating test result..."
               echo "$(params.test-output)" | jq .
 
