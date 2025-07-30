@@ -1,55 +1,100 @@
+
 apiVersion: tekton.dev/v1beta1
 kind: Pipeline
 metadata:
-  name: scheduler-routing-pipeline
+  name: remote-scheduler-routing-pipeline
   labels:
-    build.appstudio.redhat.com/pipeline: "scheduler-routing"
+    build.appstudio.redhat.com/pipeline: "remote-scheduler-routing"
 spec:
   params:
     - name: SNAPSHOT
       type: string
       description: Application snapshot with components and image URLs
+    - name: remote
+      type: string
+      description: Whether to use a remote OpenShift cluster ("true" or "false")
+      default: "false"
+    - name: context-secret
+      type: string
+      description: Secret that contains base64-encoded 'token' and 'server' keys
+      default: ""
   results:
     - name: test-output
       value: "$(tasks.test.results.test-output)"
 
   tasks:
     - name: create-namespace
+      params:
+        - name: remote
+          value: "$(params.remote)"
+        - name: context-secret
+          value: "$(params.context-secret)"
       taskSpec:
+        params:
+          - name: remote
+          - name: context-secret
         results:
           - name: namespace
             description: The temporary namespace created
         steps:
-        - name: create
-          image: quay.io/openshift/origin-cli:latest
-          script: |
-            #!/bin/bash
-            set -e
-            NS=int-test-scheduler-routing-$(cat /dev/urandom | tr -dc 'a-z0-9' | fold -w6 | head -n1)
-            echo "Creating namespace: $NS"
-            oc create namespace $NS
+          - name: create
+            image: quay.io/openshift/origin-cli:latest
+            script: |
+              #!/bin/bash
+              set -e
+              dnf -y install jq
 
-            # Copy all secrets from current namespace
-            CURRENT_NS=$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace)
-            for secret in $(oc get secrets -n $CURRENT_NS -o name); do
-              oc get $secret -n $CURRENT_NS -o yaml \
-                | sed "s/namespace: .*/namespace: $NS/" \
-                | oc apply -n $NS -f -
-            done
+              CURRENT_NS=$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace)
 
-            echo -n "$NS" > $(results.namespace.path)
-          
+              # Capture secrets from the local cluster BEFORE switching context
+              echo "Extracting secrets from current namespace: $CURRENT_NS"
+              mkdir /tmp/secrets
+              cd /tmp/secrets
+
+              for secret in $(oc get secrets -n $CURRENT_NS -o name); do
+                SECRET_NAME=$(echo $secret | cut -d'/' -f2)
+                oc get $secret -n $CURRENT_NS -o yaml | sed "s/namespace: .*/namespace: TEMP_NAMESPACE/" > "$SECRET_NAME.yaml"
+              done
+
+              # Log into the remote cluster if requested
+              if [[ "$(params.remote)" == "true" ]]; then
+                echo "Logging into remote cluster..."
+                SECRET_JSON=$(oc get secret "$(params.context-secret)" -n "$CURRENT_NS" -o json)
+                API_SERVER=$(echo "$SECRET_JSON" | jq -r '.data.server' | base64 -d)
+                TOKEN=$(echo "$SECRET_JSON" | jq -r '.data.token' | base64 -d)
+                oc login --token="$TOKEN" --server="$API_SERVER" --insecure-skip-tls-verify=true
+              fi
+
+              # Generate a namespace
+              NS=int-test-scheduler-routing-$(cat /dev/urandom | tr -dc 'a-z0-9' | fold -w6 | head -n1)
+              echo "Creating namespace: $NS"
+              oc create namespace $NS
+
+              # Re-apply the captured secrets into the new namespace on the (possibly remote) cluster
+              for f in /tmp/secrets/*.yaml; do
+                sed "s/namespace: TEMP_NAMESPACE/namespace: $NS/" "$f" | oc apply -n $NS -f -
+              done
+
+              # Output the namespace
+              echo -n "$NS" > $(results.namespace.path)
+
     - name: deploy
+      runAfter: [create-namespace]
       params:
         - name: SNAPSHOT
-          value: '$(params.SNAPSHOT)'
+          value: "$(params.SNAPSHOT)"
         - name: TEST_NS
           value: "$(tasks.create-namespace.results.namespace)"
+        - name: remote
+          value: "$(params.remote)"
+        - name: context-secret
+          value: "$(params.context-secret)"
       taskSpec:
         params:
           - name: SNAPSHOT
           - name: TEST_NS
-            type: string
+          - name: remote
+          - name: context-secret
         steps:
           - name: deploy
             image: quay.io/openshift/origin-cli:latest
@@ -108,6 +153,17 @@ spec:
                 echo "Sidecar image not found in snapshot. Trying to read from component status..."
                 SIDECAR_IMAGE=$(oc get component llm-d-routing-sidecar-b03d5 -n "$NAMESPACE" -o json | jq -r '.status.lastPromotedImage')
               fi
+
+              CURRENT_NS=$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace)
+              if [[ "$(params.remote)" == "true" ]]; then
+                echo "Logging into remote cluster..."
+                SECRET_JSON=$(oc get secret "$(params.context-secret)" -n "$CURRENT_NS" -o json)
+                API_SERVER=$(echo "$SECRET_JSON" | jq -r '.data.server' | base64 -d)
+                TOKEN=$(echo "$SECRET_JSON" | jq -r '.data.token' | base64 -d)
+                oc login --token="$TOKEN" --server="$API_SERVER" --insecure-skip-tls-verify=true
+              fi
+
+              echo "Performing deployment to $(params.TEST_NS) on $API_SERVER"
 
               echo "Deploying with:"
               echo "  Scheduler Image: $SCHEDULER_IMAGE"
@@ -231,7 +287,15 @@ spec:
 
     - name: test
       runAfter: [deploy]
+      params:
+        - name: remote
+          value: "$(params.remote)"
+        - name: context-secret
+          value: "$(params.context-secret)"
       taskSpec:
+        params:
+          - name: remote
+          - name: context-secret
         results:
           - name: test-output
             description: JSON-encoded test result
@@ -240,57 +304,73 @@ spec:
             image: quay.io/openshift/origin-cli:latest
             script: |
               #!/bin/bash
-              set +e 
+              set +e
               dnf -y install jq
-              echo "Running integration test..."
+
+              CURRENT_NS=$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace)
+              if [[ "$(params.remote)" == "true" ]]; then
+                echo "Logging into remote cluster..."
+                SECRET_JSON=$(oc get secret "$(params.context-secret)" -n "$CURRENT_NS" -o json)
+                API_SERVER=$(echo "$SECRET_JSON" | jq -r '.data.server' | base64 -d)
+                TOKEN=$(echo "$SECRET_JSON" | jq -r '.data.token' | base64 -d)
+                oc login --token="$TOKEN" --server="$API_SERVER" --insecure-skip-tls-verify=true
+              fi
+
+              echo "Testing routing-sidecar..."
 
               sleep 10
               output=$(curl -s -X POST http://routing-sidecar:8090/inference -H "Content-Type: application/json" -d '{"input": "ping"}')
+              RESULT=$(echo "$output" | grep -q '"status": "ok"' && echo "SUCCESS" || echo "FAILURE")
 
-              echo "Raw output: $output"
-
-              echo "$output" | grep -q '"status": "ok"'
-              if [ $? -eq 0 ]; then
-                RESULT="SUCCESS"
-              else
-                RESULT="FAILURE"
-              fi
-
-              TEST_OUTPUT=$(jq -rc --arg date "$(date -u --iso-8601=seconds)" --arg RESULT "$RESULT" --null-input \
-                '{"result": $RESULT, "timestamp": $date, "failures": ($RESULT == "FAILURE" | if . then 1 else 0 end), "successes": ($RESULT == "SUCCESS" | if . then 1 else 0 end), "warnings": 0}')
-
-              echo "Test output JSON: $TEST_OUTPUT"
+              TEST_OUTPUT=$(jq -rc --arg date "$(date -u --iso-8601=seconds)" --arg RESULT "$RESULT" --null-input                 '{"result": $RESULT, "timestamp": $date, "failures": ($RESULT == "FAILURE" | if . then 1 else 0 end), "successes": ($RESULT == "SUCCESS" | if . then 1 else 0 end), "warnings": 0}')
               echo "$TEST_OUTPUT" | base64 -w 0 | tee /tekton/results/test-output || true
-              exit 0  # always succeed - report result in later step
+              exit 0
 
     - name: cleanup
+      runAfter: [test]
       params:
         - name: TEST_NS
           value: "$(tasks.create-namespace.results.namespace)"
-      runAfter: [test]
+        - name: remote
+          value: "$(params.remote)"
+        - name: context-secret
+          value: "$(params.context-secret)"
       taskSpec:
         params:
           - name: TEST_NS
-            type: string
+          - name: remote
+          - name: context-secret
         steps:
           - name: cleanup
             image: quay.io/openshift/origin-cli:latest
             script: |
-              echo "Cleaning up resources..."
-              oc delete namespace "$(params.TEST_NS)" --force & disown
-              # oc delete deployment scheduler routing-sidecar || true
-              # oc delete service scheduler routing-sidecar || true
-              echo "Cleanup complete."
+              #!/bin/bash
+              set -e
+              dnf -y install jq
+
+              # CURRENT_NS=$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace)
+              # if [[ "$(params.remote)" == "true" ]]; then
+              #   echo "Logging into remote cluster..."
+              #   SECRET_JSON=$(oc get secret "$(params.context-secret)" -n "$CURRENT_NS" -o json)
+              #   API_SERVER=$(echo "$SECRET_JSON" | jq -r '.data.server' | base64 -d)
+              #   TOKEN=$(echo "$SECRET_JSON" | jq -r '.data.token' | base64 -d)
+              #   oc login --token="$TOKEN" --server="$API_SERVER" --insecure-skip-tls-verify=true
+              # fi
+
+              # echo "Cleaning up resources..."
+              # oc delete namespace "$(params.TEST_NS)" --force & disown
+              # # oc delete deployment scheduler routing-sidecar || true
+              # # oc delete service scheduler routing-sidecar || true
+              # echo "Cleanup complete."
 
     - name: evaluate-test
       runAfter: [cleanup]
       params:
         - name: test-output
-          value: "$(tasks.test.results.test-output)"  # <-- assign param value here
+          value: "$(tasks.test.results.test-output)"
       taskSpec:
         params:
           - name: test-output
-            type: string
         steps:
           - name: evaluate
             image: registry.access.redhat.com/ubi8/ubi

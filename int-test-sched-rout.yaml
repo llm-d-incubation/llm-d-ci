@@ -1,0 +1,24 @@
+apiVersion: appstudio.redhat.com/v1beta2
+kind: IntegrationTestScenario
+metadata:
+  name: scheduler-routing-test
+  namespace: user-ns1
+spec:
+  application: llm-d-test-3
+  resolverRef:
+    resolver: git
+    resourceKind: pipeline
+    params:
+      - name: url
+        value: https://github.com/clubanderson/llm-d-ci
+      - name: revision
+        value: main
+      - name: pathInRepo
+        value: /pipelines/integration-test-scheduler-routing.yaml
+
+  contexts:
+    - description: Run integration tests for routing + scheduler
+      name: application
+
+  pipeline:
+    name: scheduler-routing-pipeline
