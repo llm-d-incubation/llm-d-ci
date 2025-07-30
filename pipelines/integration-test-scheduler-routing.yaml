@@ -142,6 +142,9 @@ spec:
               sleep 10
               output=$(curl -s -X POST http://routing-sidecar:8090/inference -H "Content-Type: application/json" -d '{"input": "ping"}')
 
+              echo "Raw output:"
+              echo "$output"
+
               echo "$output" | grep -q '"status": "ok"'
               if [ $? -eq 0 ]; then
                 RESULT="SUCCESS"
@@ -149,6 +152,7 @@ spec:
                 RESULT="FAILURE"
               fi
 
-              TEST_OUTPUT=$(jq -rc --arg date $(date -u --iso-8601=seconds) --arg RESULT "$RESULT" --null-input \
+              TEST_OUTPUT=$(jq -rc --arg date "$(date -u --iso-8601=seconds)" --arg RESULT "$RESULT" --null-input \
                 '{result: $RESULT, timestamp: $date, failures: ($RESULT == "FAILURE" | if . then 1 else 0 end), successes: ($RESULT == "SUCCESS" | if . then 1 else 0 end), warnings: 0}')
-              echo -n "${TEST_OUTPUT}" | tee $(results.test-output.path)
+
+              echo "$TEST_OUTPUT" | tee /tekton/results/test-output || true
