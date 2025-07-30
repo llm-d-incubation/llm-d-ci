@@ -9,39 +9,36 @@ spec:
     - name: SNAPSHOT
       type: string
       description: Application snapshot with components and image URLs
-    - name: TEMP_NS
-      type: string
-      description: Temporary namespace for the pipeline execution
   results:
     - name: test-output
       value: "$(tasks.test.results.test-output)"
 
   tasks:
-- name: create-namespace
-  taskSpec:
-    results:
-      - name: namespace
-        description: The temporary namespace created
-    steps:
-    - name: create
-      image: quay.io/openshift/origin-cli:latest
-      script: |
-        #!/bin/bash
-        set -e
-        NS=test-$(cat /dev/urandom | tr -dc 'a-z0-9' | fold -w6 | head -n1)
-        echo "Creating namespace: $NS"
-        oc create namespace $NS
+    - name: create-namespace
+      taskSpec:
+        results:
+          - name: namespace
+            description: The temporary namespace created
+        steps:
+        - name: create
+          image: quay.io/openshift/origin-cli:latest
+          script: |
+            #!/bin/bash
+            set -e
+            NS=test-$(cat /dev/urandom | tr -dc 'a-z0-9' | fold -w6 | head -n1)
+            echo "Creating namespace: $NS"
+            oc create namespace $NS
 
-        # Copy all secrets from current namespace
-        CURRENT_NS=$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace)
-        for secret in $(oc get secrets -n $CURRENT_NS -o name); do
-          oc get $secret -n $CURRENT_NS -o yaml \
-            | sed "s/namespace: .*/namespace: $NS/" \
-            | oc apply -n $NS -f -
-        done
+            # Copy all secrets from current namespace
+            CURRENT_NS=$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace)
+            for secret in $(oc get secrets -n $CURRENT_NS -o name); do
+              oc get $secret -n $CURRENT_NS -o yaml \
+                | sed "s/namespace: .*/namespace: $NS/" \
+                | oc apply -n $NS -f -
+            done
 
-        echo -n "$NS" > $(results.namespace.path)
-        
+            echo -n "$NS" > $(results.namespace.path)
+          
     - name: deploy
       params:
         - name: SNAPSHOT
@@ -51,6 +48,8 @@ spec:
       taskSpec:
         params:
           - name: SNAPSHOT
+          - name: TEST_NS
+            type: string
         steps:
           - name: deploy
             image: quay.io/openshift/origin-cli:latest
@@ -220,6 +219,9 @@ spec:
           value: "$(tasks.create-namespace.results.namespace)"
       runAfter: [test]
       taskSpec:
+        params:
+          - name: TEST_NS
+            type: string
         steps:
           - name: cleanup
             image: quay.io/openshift/origin-cli:latest
