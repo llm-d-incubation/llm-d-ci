@@ -25,7 +25,7 @@ spec:
           script: |
             #!/bin/bash
             set -e
-            NS=test-$(cat /dev/urandom | tr -dc 'a-z0-9' | fold -w6 | head -n1)
+            NS=scheduler-routing-$(cat /dev/urandom | tr -dc 'a-z0-9' | fold -w6 | head -n1)
             echo "Creating namespace: $NS"
             oc create namespace $NS
 
