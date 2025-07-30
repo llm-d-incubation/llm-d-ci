@@ -29,26 +29,39 @@ spec:
               #!/bin/bash
               set -e
               dnf -y install jq
-              snapshotComponents=$(jq -c '.components[]' <<< "${SNAPSHOT}")
 
-              echo -e "Example test task for the Snapshot:\n ${SNAPSHOT}"
-              # Run custom tests for the given Snapshot here
-              while read componentEntry
-              do
-                # Variables
-                componentName=$(echo "${componentEntry}" | jq -r '.name')
-                componentUrl=$(echo "${componentEntry}" | jq -r '.source.git.url')
-                componentUrlWithoutSuffix=$(echo $componentUrl | sed 's/\.git$//')
-                componentSha=$(echo "${componentEntry}" | jq -r '.source.git.revision')
+              echo -e "Full Snapshot JSON:\n$SNAPSHOT"
 
-                echo "Print the information for component ${componentName} included in snapshot, more test can be added to inspect git source and containerImage in component::"
-                echo "${componentName}"
-                echo "${componentUrl}"
-                echo "${componentUrlWithoutSuffix}"
-                echo "${componentSha}"
-              done < <(echo "$snapshotComponents")
+              # Extract and print scheduler component info
+              SCHEDULER_COMPONENT=$(echo "$SNAPSHOT" | jq -c '.components[] | select(.name | test("inference-scheduler"))')
+              SCHEDULER_NAME=$(echo "$SCHEDULER_COMPONENT" | jq -r '.name')
+              SCHEDULER_URL=$(echo "$SCHEDULER_COMPONENT" | jq -r '.source.git.url')
+              SCHEDULER_SHA=$(echo "$SCHEDULER_COMPONENT" | jq -r '.source.git.revision')
+              SCHEDULER_IMAGE=$(echo "$SCHEDULER_COMPONENT" | jq -r '.containerImage')
+              SCHEDULER_URL_CLEAN=$(echo "$SCHEDULER_URL" | sed 's/\.git$//')
 
-              SNAPSHOT='$(params.SNAPSHOT)'
+              echo "Scheduler Component:"
+              echo "  Name: $SCHEDULER_NAME"
+              echo "  Repo: $SCHEDULER_URL"
+              echo "  Repo (clean): $SCHEDULER_URL_CLEAN"
+              echo "  SHA: $SCHEDULER_SHA"
+              echo "  Image: $SCHEDULER_IMAGE"
+
+              # Extract and print sidecar component info
+              SIDECAR_COMPONENT=$(echo "$SNAPSHOT" | jq -c '.components[] | select(.name | test("routing-sidecar"))')
+              SIDECAR_NAME=$(echo "$SIDECAR_COMPONENT" | jq -r '.name')
+              SIDECAR_URL=$(echo "$SIDECAR_COMPONENT" | jq -r '.source.git.url')
+              SIDECAR_SHA=$(echo "$SIDECAR_COMPONENT" | jq -r '.source.git.revision')
+              SIDECAR_IMAGE=$(echo "$SIDECAR_COMPONENT" | jq -r '.containerImage')
+              SIDECAR_URL_CLEAN=$(echo "$SIDECAR_URL" | sed 's/\.git$//')
+
+              echo "Routing Sidecar Component:"
+              echo "  Name: $SIDECAR_NAME"
+              echo "  Repo: $SIDECAR_URL"
+              echo "  Repo (clean): $SIDECAR_URL_CLEAN"
+              echo "  SHA: $SIDECAR_SHA"
+              echo "  Image: $SIDECAR_IMAGE"
+
               SCHEDULER_IMAGE=$(echo "$SNAPSHOT" | jq -r '.components[] | select(.name | test("inference-scheduler")) | .containerImage')
               SIDECAR_IMAGE=$(echo "$SNAPSHOT" | jq -r '.components[] | select(.name | test("routing-sidecar")) | .containerImage')
 
