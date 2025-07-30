@@ -95,7 +95,7 @@ spec:
               SIDECAR_IMAGE=$(echo "$SNAPSHOT" | jq -r '.components[] | select(.name | test("routing-sidecar")) | .containerImage')
 
               # Provide default values
-              NAMESPACE="$(params.TEST_NS)"
+              NAMESPACE="user-ns1"
 
               # Resolve scheduler image
               if [[ -z "$SCHEDULER_IMAGE" || "$SCHEDULER_IMAGE" == "null" ]]; then
