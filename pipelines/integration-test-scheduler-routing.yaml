@@ -29,7 +29,7 @@ spec:
               #!/bin/bash
               set -e
               dnf -y install jq
-              snapshotComponents=$(jq -c '.components[]' <<< "${SNAPSHOT}")
+              mapfile -t snapshotComponents < <(jq -c '.components[]' <<< "${SNAPSHOT}")
 
               echo -e "Example test task for the Snapshot:\n ${SNAPSHOT}"
               # Run custom tests for the given Snapshot here
@@ -41,14 +41,13 @@ spec:
                 componentUrlWithoutSuffix=$(echo $componentUrl | sed 's/\.git$//')
                 componentSha=$(echo "${componentEntry}" | jq -r '.source.git.revision')
 
-                echo "Print the infomation for component ${componentName} included in snapshot, more test can be added to inspect git source and containerImage in component::"
+                echo "Print the information for component ${componentName} included in snapshot, more test can be added to inspect git source and containerImage in component::"
                 echo "${componentName}"
                 echo "${componentUrl}"
                 echo "${componentUrlWithoutSuffix}"
                 echo "${componentSha}"
               done < <(echo "$snapshotComponents")
 
-              SNAPSHOT='$(params.SNAPSHOT)'
               SCHEDULER_IMAGE=$(echo "$SNAPSHOT" | jq -r '.components[] | select(.name | test("inference-scheduler")) | .containerImage')
               SIDECAR_IMAGE=$(echo "$SNAPSHOT" | jq -r '.components[] | select(.name | test("routing-sidecar")) | .containerImage')
 
