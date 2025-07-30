@@ -164,7 +164,7 @@ spec:
             script: |
               #!/bin/bash
               set +e 
-              dnf -y install jq
+              dnf -y install jq coreutils
               echo "Running integration test..."
 
               sleep 10
@@ -182,7 +182,7 @@ spec:
               TEST_OUTPUT=$(jq -rc --arg date "$(date -u --iso-8601=seconds)" --arg RESULT "$RESULT" --null-input \
                 '{"result": $RESULT, "timestamp": $date, "failures": ($RESULT == "FAILURE" | if . then 1 else 0 end), "successes": ($RESULT == "SUCCESS" | if . then 1 else 0 end), "warnings": 0}')
 
-              echo "$TEST_OUTPUT" | tee /tekton/results/test-output || true
+              echo "$TEST_OUTPUT" | base64 -w 0 | tee /tekton/results/test-output || true
               exit 0  # always succeed - report result in later step
 
     - name: cleanup
@@ -212,15 +212,17 @@ spec:
             script: |
               #!/bin/bash
               set -e
-              dnf -y install jq
+              dnf -y install jq coreutils
 
-              echo "Evaluating test result..."
-              echo "Raw input param:"
-              echo "$(params.test-output)"
-              echo "Attempting to parse with jq..."
-              echo "$(params.test-output)" | jq .
+              echo "Evaluating test result (base64 encoded)..."
+              echo "Encoded input: $(params.test-output)"
 
-              RESULT=$(echo '$(params.test-output)' | jq -r '.result')
+              DECODED_JSON=$(echo "$(params.test-output)" | base64 -d)
+
+              echo "Decoded JSON:"
+              echo "$DECODED_JSON" | jq .
+
+              RESULT=$(echo "$DECODED_JSON" | jq -r '.result')
 
               if [[ "$RESULT" == "SUCCESS" ]]; then
                 echo "Tests passed ✅"
