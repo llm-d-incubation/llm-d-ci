@@ -10,4 +10,6 @@ rules:
 - apiGroups: ["appstudio.redhat.com"]
   resources: ["components", "applications"]
   verbs: ["get"]
-
+- apiGroups: [""]
+  resources: ["namespaces","services"]
+  verbs: ["get", "create", "update", "delete"]

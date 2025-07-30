@@ -162,15 +162,13 @@ spec:
           - name: test
             image: registry.access.redhat.com/ubi8/python-39
             script: |
-              echo "Running integration test for scheduler and routing sidecar..."
+              #!/bin/bash
+              set +e  # disable fail-on-error
+              echo "Running integration test..."
 
-              # sleep 10
-              # curl -s -X POST http://routing-sidecar:8090/inference -H "Content-Type: application/json" -d '{"input": "ping"}'
-              
-              # output=$(curl -s -X POST http://routing-sidecar:8090/inference -H "Content-Type: application/json" -d '{"input": "ping"}')
-
-              echo "Raw output:"
-              echo "$output"
+              sleep 10
+              output=$(curl -s -X POST http://routing-sidecar:8090/inference -H "Content-Type: application/json" -d '{"input": "ping"}')
+              echo "Raw output: $output"
 
               echo "$output" | grep -q '"status": "ok"'
               if [ $? -eq 0 ]; then
@@ -183,6 +181,7 @@ spec:
                 '{result: $RESULT, timestamp: $date, failures: ($RESULT == "FAILURE" | if . then 1 else 0 end), successes: ($RESULT == "SUCCESS" | if . then 1 else 0 end), warnings: 0}')
 
               echo "$TEST_OUTPUT" | tee /tekton/results/test-output || true
+              exit 0  # always succeed
 
     - name: cleanup
       runAfter: [test]
@@ -195,3 +194,28 @@ spec:
               oc delete deployment scheduler routing-sidecar || true
               oc delete service scheduler routing-sidecar || true
               echo "Cleanup complete."
+
+    - name: evaluate-test
+      runAfter: [cleanup]
+      taskSpec:
+        params:
+          - name: test-output
+            value: "$(tasks.test.results.test-output)"
+        steps:
+          - name: evaluate
+            image: registry.access.redhat.com/ubi8/ubi
+            script: |
+              #!/bin/bash
+              set -e
+              echo "Evaluating test result..."
+              echo "$(params.test-output)" | jq .
+
+              RESULT=$(echo '$(params.test-output)' | jq -r '.result')
+
+              if [[ "$RESULT" == "SUCCESS" ]]; then
+                echo "Tests passed ✅"
+                exit 0
+              else
+                echo "Tests failed ❌"
+                exit 1
+              fi
