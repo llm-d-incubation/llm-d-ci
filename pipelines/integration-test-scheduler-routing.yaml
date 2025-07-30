@@ -66,19 +66,21 @@ spec:
               SCHEDULER_IMAGE=$(echo "$SNAPSHOT" | jq -r '.components[] | select(.name | test("inference-scheduler")) | .containerImage')
               SIDECAR_IMAGE=$(echo "$SNAPSHOT" | jq -r '.components[] | select(.name | test("routing-sidecar")) | .containerImage')
 
-              # Provide default values if images are empty or null
-              DEFAULT_SCHEDULER_IMAGE="quay.io/llm-d/user-ns1/llm-d-inference-scheduler-d79d9:latest"
-              DEFAULT_SIDECAR_IMAGE="quay.io/llm-d/user-ns1/llm-d-routing-sidecar-b03d5:latest"
-              
+              # Provide default values
+              NAMESPACE="$(oc project -q)"
+
+              # Resolve scheduler image
               if [[ -z "$SCHEDULER_IMAGE" || "$SCHEDULER_IMAGE" == "null" ]]; then
-                echo "Scheduler image not found in snapshot, using default: $DEFAULT_SCHEDULER_IMAGE"
-                SCHEDULER_IMAGE="$DEFAULT_SCHEDULER_IMAGE"
+                echo "Scheduler image not found in snapshot. Trying to read from component status..."
+                SCHEDULER_IMAGE=$(oc get component llm-d-inference-scheduler-d79d9 -n "$NAMESPACE" -o json | jq -r '.status.lastPromotedImage')
               fi
-              
+
+              # Resolve sidecar image
               if [[ -z "$SIDECAR_IMAGE" || "$SIDECAR_IMAGE" == "null" ]]; then
-                echo "Sidecar image not found in snapshot, using default: $DEFAULT_SIDECAR_IMAGE"
-                SIDECAR_IMAGE="$DEFAULT_SIDECAR_IMAGE"
+                echo "Sidecar image not found in snapshot. Trying to read from component status..."
+                SIDECAR_IMAGE=$(oc get component llm-d-routing-sidecar-b03d5 -n "$NAMESPACE" -o json | jq -r '.status.lastPromotedImage')
               fi
+
 
               echo "Deploying with:"
               echo "  Scheduler Image: $SCHEDULER_IMAGE"
