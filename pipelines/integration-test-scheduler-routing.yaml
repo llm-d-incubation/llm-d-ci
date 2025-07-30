@@ -183,7 +183,7 @@ spec:
                 '{result: $RESULT, timestamp: $date, failures: ($RESULT == "FAILURE" | if . then 1 else 0 end), successes: ($RESULT == "SUCCESS" | if . then 1 else 0 end), warnings: 0}')
 
               echo "$TEST_OUTPUT" | tee /tekton/results/test-output || true
-              exit 0  # always succeed
+              exit 0  # always succeed - report result in later step
 
     - name: cleanup
       runAfter: [test]
@@ -215,6 +215,9 @@ spec:
               dnf -y install jq
 
               echo "Evaluating test result..."
+              echo "Raw input param:"
+              echo "$(params.test-output)"
+              echo "Attempting to parse with jq..."
               echo "$(params.test-output)" | jq .
 
               RESULT=$(echo '$(params.test-output)' | jq -r '.result')
