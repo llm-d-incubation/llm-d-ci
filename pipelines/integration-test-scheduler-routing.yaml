@@ -106,6 +106,17 @@ spec:
                       ports:
                         - containerPort: 8080
               ---
+              apiVersion: v1
+              kind: Service
+              metadata:
+                name: scheduler
+              spec:
+                selector:
+                  app: scheduler
+                ports:
+                  - port: 8080
+                    targetPort: 8080
+              ---
               apiVersion: apps/v1
               kind: Deployment
               metadata:
@@ -128,6 +139,17 @@ spec:
                           value: "http://scheduler:8080"
                       ports:
                         - containerPort: 8090
+              ---
+              apiVersion: v1
+              kind: Service
+              metadata:
+                name: routing-sidecar
+              spec:
+                selector:
+                  app: routing-sidecar
+                ports:
+                  - port: 8090
+                    targetPort: 8090
               EOF
 
     - name: test
@@ -143,21 +165,33 @@ spec:
               echo "Running integration test for scheduler and routing sidecar..."
 
               # sleep 10
-              curl -s -X POST http://routing-sidecar:8090/inference -H "Content-Type: application/json" -d '{"input": "ping"}'
+              # curl -s -X POST http://routing-sidecar:8090/inference -H "Content-Type: application/json" -d '{"input": "ping"}'
               
               # output=$(curl -s -X POST http://routing-sidecar:8090/inference -H "Content-Type: application/json" -d '{"input": "ping"}')
 
-              # echo "Raw output:"
-              # echo "$output"
+              echo "Raw output:"
+              echo "$output"
 
-              # echo "$output" | grep -q '"status": "ok"'
-              # if [ $? -eq 0 ]; then
-              #   RESULT="SUCCESS"
-              # else
-              #   RESULT="FAILURE"
-              # fi
+              echo "$output" | grep -q '"status": "ok"'
+              if [ $? -eq 0 ]; then
+                RESULT="SUCCESS"
+              else
+                RESULT="FAILURE"
+              fi
 
-              # TEST_OUTPUT=$(jq -rc --arg date "$(date -u --iso-8601=seconds)" --arg RESULT "$RESULT" --null-input \
-              #   '{result: $RESULT, timestamp: $date, failures: ($RESULT == "FAILURE" | if . then 1 else 0 end), successes: ($RESULT == "SUCCESS" | if . then 1 else 0 end), warnings: 0}')
+              TEST_OUTPUT=$(jq -rc --arg date "$(date -u --iso-8601=seconds)" --arg RESULT "$RESULT" --null-input \
+                '{result: $RESULT, timestamp: $date, failures: ($RESULT == "FAILURE" | if . then 1 else 0 end), successes: ($RESULT == "SUCCESS" | if . then 1 else 0 end), warnings: 0}')
 
-              # echo "$TEST_OUTPUT" | tee /tekton/results/test-output || true
+              echo "$TEST_OUTPUT" | tee /tekton/results/test-output || true
+
+    - name: cleanup
+      runAfter: [test]
+      taskSpec:
+        steps:
+          - name: cleanup
+            image: quay.io/openshift/origin-cli:latest
+            script: |
+              echo "Cleaning up resources..."
+              oc delete deployment scheduler routing-sidecar || true
+              oc delete service scheduler routing-sidecar || true
+              echo "Cleanup complete."
