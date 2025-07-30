@@ -197,10 +197,13 @@ spec:
 
     - name: evaluate-test
       runAfter: [cleanup]
+      params:
+        - name: test-output
+          value: "$(tasks.test.results.test-output)"  # <-- assign param value here
       taskSpec:
         params:
           - name: test-output
-            value: "$(tasks.test.results.test-output)"
+            type: string
         steps:
           - name: evaluate
             image: registry.access.redhat.com/ubi8/ubi
