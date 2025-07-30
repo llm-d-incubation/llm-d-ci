@@ -164,7 +164,7 @@ spec:
             script: |
               #!/bin/bash
               set +e 
-              dnf -y install jq coreutils
+              dnf -y install jq
               echo "Running integration test..."
 
               sleep 10
@@ -212,7 +212,7 @@ spec:
             script: |
               #!/bin/bash
               set -e
-              dnf -y install jq coreutils
+              dnf -y install jq
 
               echo "Evaluating test result (base64 encoded)..."
               echo "Encoded input: $(params.test-output)"
