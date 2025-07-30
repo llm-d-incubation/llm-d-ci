@@ -180,7 +180,7 @@ spec:
               fi
 
               TEST_OUTPUT=$(jq -rc --arg date "$(date -u --iso-8601=seconds)" --arg RESULT "$RESULT" --null-input \
-                '{result: $RESULT, timestamp: $date, failures: ($RESULT == "FAILURE" | if . then 1 else 0 end), successes: ($RESULT == "SUCCESS" | if . then 1 else 0 end), warnings: 0}')
+                '{"result": $RESULT, "timestamp": $date, "failures": ($RESULT == "FAILURE" | if . then 1 else 0 end), "successes": ($RESULT == "SUCCESS" | if . then 1 else 0 end), "warnings": 0}')
 
               echo "$TEST_OUTPUT" | tee /tekton/results/test-output || true
               exit 0  # always succeed - report result in later step
