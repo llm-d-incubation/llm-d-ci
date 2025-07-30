@@ -379,20 +379,20 @@ spec:
               set -e
               dnf -y install jq
 
-              # echo "Evaluating test result (base64 encoded)..."
-              # echo "Encoded input: $(params.test-output)"
+              echo "Evaluating test result (base64 encoded)..."
+              echo "Encoded input: $(params.test-output)"
 
-              # DECODED_JSON=$(echo "$(params.test-output)" | base64 -d)
+              DECODED_JSON=$(echo "$(params.test-output)" | base64 -d)
 
-              # echo "Decoded JSON:"
-              # echo "$DECODED_JSON" | jq .
+              echo "Decoded JSON:"
+              echo "$DECODED_JSON" | jq .
 
-              # RESULT=$(echo "$DECODED_JSON" | jq -r '.result')
+              RESULT=$(echo "$DECODED_JSON" | jq -r '.result')
 
-              # if [[ "$RESULT" == "SUCCESS" ]]; then
-              #   echo "Tests passed ✅"
-              #   exit 0
-              # else
-              #   echo "Tests failed ❌"
-              #   exit 1
-              # fi
+              if [[ "$RESULT" == "SUCCESS" ]]; then
+                echo "Tests passed ✅"
+                exit 0
+              else
+                echo "Tests failed ❌"
+                exit 1
+              fi

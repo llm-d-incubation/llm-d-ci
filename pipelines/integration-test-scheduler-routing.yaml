@@ -277,9 +277,7 @@ spec:
             image: quay.io/openshift/origin-cli:latest
             script: |
               echo "Cleaning up resources..."
-              oc delete namespace "$(params.TEST_NS)" --force & disown
-              # oc delete deployment scheduler routing-sidecar || true
-              # oc delete service scheduler routing-sidecar || true
+              # oc delete namespace "$(params.TEST_NS)" --force & disown
               echo "Cleanup complete."
 
     - name: evaluate-test
