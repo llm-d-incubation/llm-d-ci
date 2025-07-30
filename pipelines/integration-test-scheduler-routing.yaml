@@ -53,7 +53,7 @@ spec:
           values: ["true"]
       taskRef:
         name: component-image
-        bundle: quay.io/redhat-appstudio-tekton-catalog/task-component-image:latest
+        kind: ClusterTask
       params:
         - name: COMPONENT_NAME
           value: llm-d-inference-scheduler-d79d9
@@ -65,7 +65,7 @@ spec:
           values: ["true"]
       taskRef:
         name: component-image
-        bundle: quay.io/redhat-appstudio-tekton-catalog/task-component-image:latest
+        kind: ClusterTask
       params:
         - name: COMPONENT_NAME
           value: llm-d-routing-sidecar-b03d5
