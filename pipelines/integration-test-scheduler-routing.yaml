@@ -160,7 +160,7 @@ spec:
             description: JSON-encoded test result
         steps:
           - name: test
-            image: registry.access.redhat.com/ubi8/python-39
+            image: quay.io/openshift/origin-cli:latest
             script: |
               #!/bin/bash
               set +e 
