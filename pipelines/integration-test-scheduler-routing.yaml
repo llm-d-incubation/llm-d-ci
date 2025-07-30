@@ -67,7 +67,7 @@ spec:
               SIDECAR_IMAGE=$(echo "$SNAPSHOT" | jq -r '.components[] | select(.name | test("routing-sidecar")) | .containerImage')
 
               # Provide default values
-              NAMESPACE="$(oc project -q)"
+              NAMESPACE="$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace)"
 
               # Resolve scheduler image
               if [[ -z "$SCHEDULER_IMAGE" || "$SCHEDULER_IMAGE" == "null" ]]; then
@@ -80,7 +80,6 @@ spec:
                 echo "Sidecar image not found in snapshot. Trying to read from component status..."
                 SIDECAR_IMAGE=$(oc get component llm-d-routing-sidecar-b03d5 -n "$NAMESPACE" -o json | jq -r '.status.lastPromotedImage')
               fi
-
 
               echo "Deploying with:"
               echo "  Scheduler Image: $SCHEDULER_IMAGE"
