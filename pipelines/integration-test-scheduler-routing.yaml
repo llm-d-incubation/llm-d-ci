@@ -29,9 +29,9 @@ spec:
               #!/bin/bash
               set -e
               dnf -y install jq
-              mapfile -t snapshotComponents < <(jq -c '.components[]' <<< "${SNAPSHOT}")
+              snapshotComponents=$(jq -c '.components[]' <<< "$(params.SNAPSHOT)")
 
-              echo -e "Example test task for the Snapshot:\n ${SNAPSHOT}"
+              echo -e "Example test task for the Snapshot:\n $(params.SNAPSHOT)"
               # Run custom tests for the given Snapshot here
               while read componentEntry
               do
@@ -48,6 +48,7 @@ spec:
                 echo "${componentSha}"
               done < <(echo "$snapshotComponents")
 
+              SNAPSHOT='$(params.SNAPSHOT)'
               SCHEDULER_IMAGE=$(echo "$SNAPSHOT" | jq -r '.components[] | select(.name | test("inference-scheduler")) | .containerImage')
               SIDECAR_IMAGE=$(echo "$SNAPSHOT" | jq -r '.components[] | select(.name | test("routing-sidecar")) | .containerImage')
 
