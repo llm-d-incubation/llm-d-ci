@@ -23,9 +23,4 @@ spec:
   pipeline:
     name: scheduler-routing-pipeline
 
-  params:
-    - name: llm-d-inference-scheduler-d79d9-image
-      value: "{{image_url_component_llm-d-inference-scheduler-d79d9}}"
-    - name: llm-d-routing-sidecar-b03d5-image
-      value: "{{image_url_component_llm-d-routing-sidecar-b03d5}}"
 
