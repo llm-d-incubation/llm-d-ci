@@ -168,7 +168,7 @@ spec:
               echo "Running integration test..."
 
               sleep 10
-              # output=$(curl -s -X POST http://routing-sidecar:8090/inference -H "Content-Type: application/json" -d '{"input": "ping"}')
+              output=$(curl -s -X POST http://routing-sidecar:8090/inference -H "Content-Type: application/json" -d '{"input": "ping"}')
 
               echo "Raw output: $output"
 
