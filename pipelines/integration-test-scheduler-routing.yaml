@@ -140,20 +140,20 @@ spec:
             image: registry.access.redhat.com/ubi8/python-39
             script: |
               echo "Running integration test for scheduler and routing sidecar..."
-              # sleep 10
-              # output=$(curl -s -X POST http://routing-sidecar:8090/inference -H "Content-Type: application/json" -d '{"input": "ping"}')
+              sleep 10
+              output=$(curl -s -X POST http://routing-sidecar:8090/inference -H "Content-Type: application/json" -d '{"input": "ping"}')
 
-              # echo "Raw output:"
-              # echo "$output"
+              echo "Raw output:"
+              echo "$output"
 
-              # echo "$output" | grep -q '"status": "ok"'
-              # if [ $? -eq 0 ]; then
-              #   RESULT="SUCCESS"
-              # else
-              #   RESULT="FAILURE"
-              # fi
+              echo "$output" | grep -q '"status": "ok"'
+              if [ $? -eq 0 ]; then
+                RESULT="SUCCESS"
+              else
+                RESULT="FAILURE"
+              fi
 
-              # TEST_OUTPUT=$(jq -rc --arg date "$(date -u --iso-8601=seconds)" --arg RESULT "$RESULT" --null-input \
-              #   '{result: $RESULT, timestamp: $date, failures: ($RESULT == "FAILURE" | if . then 1 else 0 end), successes: ($RESULT == "SUCCESS" | if . then 1 else 0 end), warnings: 0}')
+              TEST_OUTPUT=$(jq -rc --arg date "$(date -u --iso-8601=seconds)" --arg RESULT "$RESULT" --null-input \
+                '{result: $RESULT, timestamp: $date, failures: ($RESULT == "FAILURE" | if . then 1 else 0 end), successes: ($RESULT == "SUCCESS" | if . then 1 else 0 end), warnings: 0}')
 
-              # echo "$TEST_OUTPUT" | tee /tekton/results/test-output || true
+              echo "$TEST_OUTPUT" | tee /tekton/results/test-output || true
