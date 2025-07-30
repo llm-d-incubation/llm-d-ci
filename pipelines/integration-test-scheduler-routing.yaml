@@ -19,9 +19,9 @@ spec:
     - name: deploy
       params:
         - name: scheduler-image
-          value: $(params.scheduler-image)
+          value: $(params.llm-d-inference-scheduler-d79d9-image)
         - name: sidecar-image
-          value: $(params.sidecar-image)
+          value: $(params.llm-d-routing-sidecar-b03d5)
       taskSpec:
         params:
           - name: scheduler-image
