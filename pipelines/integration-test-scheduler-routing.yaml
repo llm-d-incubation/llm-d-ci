@@ -1,4 +1,4 @@
-apiVersion: tekton.dev/v1
+apiVersion: tekton.dev/v1beta1
 kind: Pipeline
 metadata:
   name: scheduler-routing-pipeline
@@ -6,10 +6,9 @@ metadata:
     build.appstudio.redhat.com/pipeline: "scheduler-routing"
 spec:
   params:
-    - name: llm-d-inference-scheduler-d79d9-image
+    - name: SNAPSHOT
       type: string
-    - name: llm-d-routing-sidecar-b03d5
-      type: string
+      description: Application snapshot with components and image URLs
 
   results:
     - name: test-output
@@ -18,18 +17,31 @@ spec:
   tasks:
     - name: deploy
       params:
-        - name: scheduler-image
-          value: $(params.llm-d-inference-scheduler-d79d9-image)
-        - name: sidecar-image
-          value: $(params.llm-d-routing-sidecar-b03d5)
+        - name: SNAPSHOT
+          value: $(params.SNAPSHOT)
       taskSpec:
         params:
-          - name: scheduler-image
-          - name: sidecar-image
+          - name: SNAPSHOT
         steps:
           - name: deploy
             image: quay.io/openshift/origin-cli:latest
             script: |
+              #!/bin/bash
+              set -e
+
+              # Install jq
+              if ! command -v jq &> /dev/null; then
+                microdnf install -y jq
+              fi
+
+              SNAPSHOT='$(params.SNAPSHOT)'
+              SCHEDULER_IMAGE=$(echo "$SNAPSHOT" | jq -r '.components[] | select(.name | test("inference-scheduler")) | .containerImage')
+              SIDECAR_IMAGE=$(echo "$SNAPSHOT" | jq -r '.components[] | select(.name | test("routing-sidecar")) | .containerImage')
+
+              echo "Deploying with:"
+              echo "  Scheduler Image: $SCHEDULER_IMAGE"
+              echo "  Sidecar Image: $SIDECAR_IMAGE"
+
               oc apply -f - <<EOF
               apiVersion: apps/v1
               kind: Deployment
@@ -47,7 +59,7 @@ spec:
                   spec:
                     containers:
                     - name: scheduler
-                      image: $(params.scheduler-image)
+                      image: $SCHEDULER_IMAGE
                       ports:
                         - containerPort: 8080
               ---
@@ -67,7 +79,7 @@ spec:
                   spec:
                     containers:
                     - name: routing-sidecar
-                      image: $(params.sidecar-image)
+                      image: $SIDECAR_IMAGE
                       env:
                         - name: SCHEDULER_HOST
                           value: "http://scheduler:8080"
@@ -80,11 +92,21 @@ spec:
       taskSpec:
         results:
           - name: test-output
+            description: JSON-encoded test result
         steps:
           - name: test
             image: registry.access.redhat.com/ubi8/python-39
             script: |
               sleep 10
               output=$(curl -s -X POST http://routing-sidecar:8090/inference -H "Content-Type: application/json" -d '{"input": "ping"}')
-              echo "$output" | tee /tekton/results/test-output
-              echo "$output" | grep -q '"status": "ok"' || exit 1
+
+              echo "$output" | grep -q '"status": "ok"'
+              if [ $? -eq 0 ]; then
+                RESULT="SUCCESS"
+              else
+                RESULT="FAILURE"
+              fi
+
+              TEST_OUTPUT=$(jq -rc --arg date $(date -u --iso-8601=seconds) --arg RESULT "$RESULT" --null-input \
+                '{result: $RESULT, timestamp: $date, failures: ($RESULT == "FAILURE" | if . then 1 else 0 end), successes: ($RESULT == "SUCCESS" | if . then 1 else 0 end), warnings: 0}')
+              echo -n "${TEST_OUTPUT}" | tee $(results.test-output.path)
