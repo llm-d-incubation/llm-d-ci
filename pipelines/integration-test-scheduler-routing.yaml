@@ -18,7 +18,7 @@ spec:
     - name: deploy
       params:
         - name: SNAPSHOT
-          value: $(params.SNAPSHOT)
+          value: '$(params.SNAPSHOT)'
       taskSpec:
         params:
           - name: SNAPSHOT
@@ -29,9 +29,9 @@ spec:
               #!/bin/bash
               set -e
               dnf -y install jq
-              snapshotComponents=$(jq -c '.components[]' <<< "$(params.SNAPSHOT)")
+              snapshotComponents=$(jq -c '.components[]' <<< "${SNAPSHOT}")
 
-              echo -e "Example test task for the Snapshot:\n $(params.SNAPSHOT)"
+              echo -e "Example test task for the Snapshot:\n ${SNAPSHOT}"
               # Run custom tests for the given Snapshot here
               while read componentEntry
               do
