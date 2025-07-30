@@ -15,20 +15,15 @@ spec:
       value: "$(tasks.test.results.test-output)"
 
   tasks:
-    - name: extract-images
+    - name: deploy
       params:
         - name: SNAPSHOT
-          value: $(params.SNAPSHOT)
+          value: '$(params.SNAPSHOT)'
       taskSpec:
         params:
           - name: SNAPSHOT
-        results:
-          - name: SCHEDULER_IMAGE
-          - name: SIDECAR_IMAGE
-          - name: SCHEDULER_IMAGE_EMPTY
-          - name: SIDECAR_IMAGE_EMPTY
         steps:
-          - name: extract
+          - name: deploy
             image: quay.io/openshift/origin-cli:latest
             script: |
               #!/bin/bash
@@ -36,54 +31,54 @@ spec:
               dnf -y install jq
 
               SNAPSHOT='$(params.SNAPSHOT)'
+              echo -e "Full Snapshot JSON:\n$SNAPSHOT"
 
-              SCHEDULER_IMAGE=$(echo "$SNAPSHOT" | jq -r '.components[] | select(.name | test("inference-scheduler")) | .containerImage // empty')
-              SIDECAR_IMAGE=$(echo "$SNAPSHOT" | jq -r '.components[] | select(.name | test("routing-sidecar")) | .containerImage // empty')
+              # Extract and print scheduler component info
+              SCHEDULER_COMPONENT=$(echo "$SNAPSHOT" | jq -c '.components[] | select(.name | test("inference-scheduler"))')
+              SCHEDULER_NAME=$(echo "$SCHEDULER_COMPONENT" | jq -r '.name')
+              SCHEDULER_URL=$(echo "$SCHEDULER_COMPONENT" | jq -r '.source.git.url')
+              SCHEDULER_SHA=$(echo "$SCHEDULER_COMPONENT" | jq -r '.source.git.revision')
+              SCHEDULER_IMAGE=$(echo "$SCHEDULER_COMPONENT" | jq -r '.containerImage')
+              SCHEDULER_URL_CLEAN=$(echo "$SCHEDULER_URL" | sed 's/\.git$//')
 
-              echo "$SCHEDULER_IMAGE" > $(results.SCHEDULER_IMAGE.path)
-              echo "$SIDECAR_IMAGE" > $(results.SIDECAR_IMAGE.path)
+              echo "Scheduler Component:"
+              echo "  Name: $SCHEDULER_NAME"
+              echo "  Repo: $SCHEDULER_URL"
+              echo "  Repo (clean): $SCHEDULER_URL_CLEAN"
+              echo "  SHA: $SCHEDULER_SHA"
+              echo "  Image: $SCHEDULER_IMAGE"
 
-              if [[ -z "$SCHEDULER_IMAGE" ]]; then echo "true" > $(results.SCHEDULER_IMAGE_EMPTY.path); else echo "false" > $(results.SCHEDULER_IMAGE_EMPTY.path); fi
-              if [[ -z "$SIDECAR_IMAGE" ]]; then echo "true" > $(results.SIDECAR_IMAGE_EMPTY.path); else echo "false" > $(results.SIDECAR_IMAGE_EMPTY.path); fi
+              # Extract and print sidecar component info
+              SIDECAR_COMPONENT=$(echo "$SNAPSHOT" | jq -c '.components[] | select(.name | test("routing-sidecar"))')
+              SIDECAR_NAME=$(echo "$SIDECAR_COMPONENT" | jq -r '.name')
+              SIDECAR_URL=$(echo "$SIDECAR_COMPONENT" | jq -r '.source.git.url')
+              SIDECAR_SHA=$(echo "$SIDECAR_COMPONENT" | jq -r '.source.git.revision')
+              SIDECAR_IMAGE=$(echo "$SIDECAR_COMPONENT" | jq -r '.containerImage')
+              SIDECAR_URL_CLEAN=$(echo "$SIDECAR_URL" | sed 's/\.git$//')
 
-    - name: get-scheduler-image
-      when:
-        - input: "$(tasks.extract-images.results.SCHEDULER_IMAGE_EMPTY)"
-          operator: in
-          values: ["true"]
-      taskRef:
-        name: component-image
-        kind: ClusterTask
-      params:
-        - name: COMPONENT_NAME
-          value: llm-d-inference-scheduler-d79d9
+              echo "Routing Sidecar Component:"
+              echo "  Name: $SIDECAR_NAME"
+              echo "  Repo: $SIDECAR_URL"
+              echo "  Repo (clean): $SIDECAR_URL_CLEAN"
+              echo "  SHA: $SIDECAR_SHA"
+              echo "  Image: $SIDECAR_IMAGE"
 
-    - name: get-sidecar-image
-      when:
-        - input: "$(tasks.extract-images.results.SIDECAR_IMAGE_EMPTY)"
-          operator: in
-          values: ["true"]
-      taskRef:
-        name: component-image
-        kind: ClusterTask
-      params:
-        - name: COMPONENT_NAME
-          value: llm-d-routing-sidecar-b03d5
+              SCHEDULER_IMAGE=$(echo "$SNAPSHOT" | jq -r '.components[] | select(.name | test("inference-scheduler")) | .containerImage')
+              SIDECAR_IMAGE=$(echo "$SNAPSHOT" | jq -r '.components[] | select(.name | test("routing-sidecar")) | .containerImage')
 
-    - name: deploy
-      runAfter: [extract-images, get-scheduler-image, get-sidecar-image]
-      taskSpec:
-        params:
-          - name: SCHEDULER_IMAGE
-          - name: SIDECAR_IMAGE
-        steps:
-          - name: deploy
-            image: quay.io/openshift/origin-cli:latest
-            script: |
-              #!/bin/bash
-              set -e
-              SCHEDULER_IMAGE="$(params.SCHEDULER_IMAGE)"
-              SIDECAR_IMAGE="$(params.SIDECAR_IMAGE)"
+              # Provide default values if images are empty or null
+              DEFAULT_SCHEDULER_IMAGE="quay.io/llm-d/user-ns1/llm-d-inference-scheduler-d79d9:latest"
+              DEFAULT_SIDECAR_IMAGE="quay.io/llm-d/user-ns1/llm-d-routing-sidecar-b03d5:latest"
+              
+              if [[ -z "$SCHEDULER_IMAGE" || "$SCHEDULER_IMAGE" == "null" ]]; then
+                echo "Scheduler image not found in snapshot, using default: $DEFAULT_SCHEDULER_IMAGE"
+                SCHEDULER_IMAGE="$DEFAULT_SCHEDULER_IMAGE"
+              fi
+              
+              if [[ -z "$SIDECAR_IMAGE" || "$SIDECAR_IMAGE" == "null" ]]; then
+                echo "Sidecar image not found in snapshot, using default: $DEFAULT_SIDECAR_IMAGE"
+                SIDECAR_IMAGE="$DEFAULT_SIDECAR_IMAGE"
+              fi
 
               echo "Deploying with:"
               echo "  Scheduler Image: $SCHEDULER_IMAGE"
@@ -133,17 +128,13 @@ spec:
                       ports:
                         - containerPort: 8090
               EOF
-      params:
-        - name: SCHEDULER_IMAGE
-          value: $(tasks.get-scheduler-image.results.IMAGE_URL)
-        - name: SIDECAR_IMAGE
-          value: $(tasks.get-sidecar-image.results.IMAGE_URL)
 
     - name: test
       runAfter: [deploy]
       taskSpec:
         results:
           - name: test-output
+            description: JSON-encoded test result
         steps:
           - name: test
             image: registry.access.redhat.com/ubi8/python-39
@@ -151,7 +142,8 @@ spec:
               sleep 10
               output=$(curl -s -X POST http://routing-sidecar:8090/inference -H "Content-Type: application/json" -d '{"input": "ping"}')
 
-              if echo "$output" | grep -q '"status": "ok"'; then
+              echo "$output" | grep -q '"status": "ok"'
+              if [ $? -eq 0 ]; then
                 RESULT="SUCCESS"
               else
                 RESULT="FAILURE"
@@ -159,4 +151,4 @@ spec:
 
               TEST_OUTPUT=$(jq -rc --arg date $(date -u --iso-8601=seconds) --arg RESULT "$RESULT" --null-input \
                 '{result: $RESULT, timestamp: $date, failures: ($RESULT == "FAILURE" | if . then 1 else 0 end), successes: ($RESULT == "SUCCESS" | if . then 1 else 0 end), warnings: 0}')
-              echo -n "$TEST_OUTPUT" | tee $(results.test-output.path)
+              echo -n "${TEST_OUTPUT}" | tee $(results.test-output.path)
