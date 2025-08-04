@@ -145,13 +145,13 @@ spec:
               # Resolve scheduler image
               if [[ -z "$SCHEDULER_IMAGE" || "$SCHEDULER_IMAGE" == "null" ]]; then
                 echo "Scheduler image not found in snapshot. Trying to read from component status..."
-                SCHEDULER_IMAGE=$(oc get component llm-d-inference-scheduler-d79d9 -n "$NAMESPACE" -o json | jq -r '.status.lastPromotedImage')
+                SCHEDULER_IMAGE=$(oc get component llm-d-inference-scheduler -n "$NAMESPACE" -o json | jq -r '.status.lastPromotedImage')
               fi
 
               # Resolve sidecar image
               if [[ -z "$SIDECAR_IMAGE" || "$SIDECAR_IMAGE" == "null" ]]; then
                 echo "Sidecar image not found in snapshot. Trying to read from component status..."
-                SIDECAR_IMAGE=$(oc get component llm-d-routing-sidecar-b03d5 -n "$NAMESPACE" -o json | jq -r '.status.lastPromotedImage')
+                SIDECAR_IMAGE=$(oc get component llm-d-routing-sidecar -n "$NAMESPACE" -o json | jq -r '.status.lastPromotedImage')
               fi
 
               CURRENT_NS=$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace)
