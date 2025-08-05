@@ -322,8 +322,16 @@ spec:
               output=$(curl -s -X POST http://routing-sidecar:8090/inference -H "Content-Type: application/json" -d '{"input": "ping"}')
               RESULT=$(echo "$output" | grep -q '"status": "ok"' && echo "SUCCESS" || echo "FAILURE")
 
-              TEST_OUTPUT=$(jq -rc --arg date "$(date -u --iso-8601=seconds)" --arg RESULT "$RESULT" --null-input                 '{"result": $RESULT, "timestamp": $date, "failures": ($RESULT == "FAILURE" | if . then 1 else 0 end), "successes": ($RESULT == "SUCCESS" | if . then 1 else 0 end), "warnings": 0}')
-              echo "$TEST_OUTPUT" | base64 -w 0 | tee /tekton/results/test-output || true
+              TEST_OUTPUT=$(jq -rc --arg date "$(date -u --iso-8601=seconds)" --arg RESULT "$RESULT" --null-input \
+                              '{"result": $RESULT, "timestamp": $date, "failures": ($RESULT == "FAILURE" | if . then 1 else 0 end), "successes": ($RESULT == "SUCCESS" | if . then 1 else 0 end), "warnings": 0}')
+              echo "🔓 Decoded TEST_OUTPUT:"
+              echo "$TEST_OUTPUT"
+
+              ENCODED_OUTPUT=$(echo "$TEST_OUTPUT" | base64 -w 0)
+
+              echo "🔐 Encoded TEST_OUTPUT (base64):"
+              echo "$ENCODED_OUTPUT" | tee /tekton/results/test-output || true
+
               exit 0
 
     - name: cleanup
