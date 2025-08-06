@@ -1,0 +1,321 @@
+apiVersion: tekton.dev/v1beta1
+kind: Pipeline
+metadata:
+  name: scheduler-routing-pipeline
+  labels:
+    build.appstudio.redhat.com/pipeline: "scheduler-routing"
+spec:
+  params:
+    - name: SNAPSHOT
+      type: string
+      description: Application snapshot with components and image URLs
+  results:
+    - name: test-output
+      value: "$(tasks.test.results.test-output)"
+
+  tasks:
+    - name: create-namespace
+      taskSpec:
+        results:
+          - name: namespace
+            description: The temporary namespace created
+        steps:
+        - name: create
+          image: quay.io/openshift/origin-cli:latest
+          script: |
+            #!/bin/bash
+            set -e
+            NS=int-test-scheduler-routing-$(cat /dev/urandom | tr -dc 'a-z0-9' | fold -w6 | head -n1)
+            echo "Creating namespace: $NS"
+            oc create namespace $NS
+
+            # Copy all secrets from current namespace
+            CURRENT_NS=$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace)
+            for secret in $(oc get secrets -n $CURRENT_NS -o name); do
+              oc get $secret -n $CURRENT_NS -o yaml \
+                | sed "s/namespace: .*/namespace: $NS/" \
+                | oc apply -n $NS -f -
+            done
+
+            echo -n "$NS" > $(results.namespace.path)
+          
+    - name: deploy
+      params:
+        - name: SNAPSHOT
+          value: '$(params.SNAPSHOT)'
+        - name: TEST_NS
+          value: "$(tasks.create-namespace.results.namespace)"
+      taskSpec:
+        params:
+          - name: SNAPSHOT
+          - name: TEST_NS
+            type: string
+        steps:
+          - name: deploy
+            image: quay.io/openshift/origin-cli:latest
+            script: |
+              #!/bin/bash
+              set -e
+              dnf -y install jq
+
+              SNAPSHOT='$(params.SNAPSHOT)'
+              echo -e "Full Snapshot JSON:\n$SNAPSHOT"
+
+              # Extract and print scheduler component info
+              SCHEDULER_COMPONENT=$(echo "$SNAPSHOT" | jq -c '.components[] | select(.name | test("inference-scheduler"))')
+              SCHEDULER_NAME=$(echo "$SCHEDULER_COMPONENT" | jq -r '.name')
+              SCHEDULER_URL=$(echo "$SCHEDULER_COMPONENT" | jq -r '.source.git.url')
+              SCHEDULER_SHA=$(echo "$SCHEDULER_COMPONENT" | jq -r '.source.git.revision')
+              SCHEDULER_IMAGE=$(echo "$SCHEDULER_COMPONENT" | jq -r '.containerImage')
+              SCHEDULER_URL_CLEAN=$(echo "$SCHEDULER_URL" | sed 's/\.git$//')
+
+              echo "Scheduler Component:"
+              echo "  Name: $SCHEDULER_NAME"
+              echo "  Repo: $SCHEDULER_URL"
+              echo "  Repo (clean): $SCHEDULER_URL_CLEAN"
+              echo "  SHA: $SCHEDULER_SHA"
+              echo "  Image: $SCHEDULER_IMAGE"
+
+              # Extract and print sidecar component info
+              SIDECAR_COMPONENT=$(echo "$SNAPSHOT" | jq -c '.components[] | select(.name | test("routing-sidecar"))')
+              SIDECAR_NAME=$(echo "$SIDECAR_COMPONENT" | jq -r '.name')
+              SIDECAR_URL=$(echo "$SIDECAR_COMPONENT" | jq -r '.source.git.url')
+              SIDECAR_SHA=$(echo "$SIDECAR_COMPONENT" | jq -r '.source.git.revision')
+              SIDECAR_IMAGE=$(echo "$SIDECAR_COMPONENT" | jq -r '.containerImage')
+              SIDECAR_URL_CLEAN=$(echo "$SIDECAR_URL" | sed 's/\.git$//')
+
+              echo "Routing Sidecar Component:"
+              echo "  Name: $SIDECAR_NAME"
+              echo "  Repo: $SIDECAR_URL"
+              echo "  Repo (clean): $SIDECAR_URL_CLEAN"
+              echo "  SHA: $SIDECAR_SHA"
+              echo "  Image: $SIDECAR_IMAGE"
+
+              SCHEDULER_IMAGE=$(echo "$SNAPSHOT" | jq -r '.components[] | select(.name | test("inference-scheduler")) | .containerImage')
+              SIDECAR_IMAGE=$(echo "$SNAPSHOT" | jq -r '.components[] | select(.name | test("routing-sidecar")) | .containerImage')
+
+              # Provide default values
+              NAMESPACE="user-ns1"
+
+              # Resolve scheduler image
+              if [[ -z "$SCHEDULER_IMAGE" || "$SCHEDULER_IMAGE" == "null" ]]; then
+                echo "Scheduler image not found in snapshot. Trying to read from component status..."
+                SCHEDULER_IMAGE=$(oc get component llm-d-inference-scheduler -n "$NAMESPACE" -o json | jq -r '.status.lastPromotedImage')
+              fi
+
+              # Resolve sidecar image
+              if [[ -z "$SIDECAR_IMAGE" || "$SIDECAR_IMAGE" == "null" ]]; then
+                echo "Sidecar image not found in snapshot. Trying to read from component status..."
+                SIDECAR_IMAGE=$(oc get component llm-d-routing-sidecar -n "$NAMESPACE" -o json | jq -r '.status.lastPromotedImage')
+              fi
+
+              echo "Deploying with:"
+              echo "  Scheduler Image: $SCHEDULER_IMAGE"
+              echo "  Sidecar Image: $SIDECAR_IMAGE"
+
+              oc apply -f - <<EOF
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: scheduler
+                namespace: $(params.TEST_NS)
+              spec:
+                replicas: 1
+                selector:
+                  matchLabels:
+                    app: scheduler
+                template:
+                  metadata:
+                    labels:
+                      app: scheduler
+                  spec:
+                    containers:
+                    - name: scheduler
+                      args:
+                      - --poolName
+                      - ms-llm-d-modelservice
+                      - --poolNamespace
+                      - default
+                      - -v
+                      - "4"
+                      - --zap-encoder
+                      - json
+                      - --grpcPort
+                      - "9002"
+                      - --grpcHealthPort
+                      - "9003"
+                      image: $SCHEDULER_IMAGE
+                      ports:
+                      - containerPort: 9002
+                        name: grpc
+                        protocol: TCP
+                      - containerPort: 9003
+                        name: grpc-health
+                        protocol: TCP
+                      - containerPort: 9090
+                        name: metrics
+                        protocol: TCP
+                      readinessProbe:
+                        grpc:
+                          port: 9003
+                          service: envoy.service.ext_proc.v3.ExternalProcessor
+                        initialDelaySeconds: 5
+                        timeoutSeconds: 1
+                        periodSeconds: 10
+                        successThreshold: 1
+                        failureThreshold: 3
+                      livenessProbe:
+                        grpc:
+                          port: 9003
+                          service: envoy.service.ext_proc.v3.ExternalProcessor
+                        initialDelaySeconds: 5
+                        timeoutSeconds: 1
+                        periodSeconds: 10
+                        successThreshold: 1
+                        failureThreshold: 3
+              ---
+              apiVersion: v1
+              kind: Service
+              metadata:
+                name: scheduler
+                namespace: $(params.TEST_NS)
+              spec:
+                selector:
+                  app: scheduler
+                ports:
+                  - port: 8080
+                    targetPort: 8080
+              ---
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: routing-sidecar
+                namespace: $(params.TEST_NS)
+              spec:
+                replicas: 1
+                selector:
+                  matchLabels:
+                    app: routing-sidecar
+                template:
+                  metadata:
+                    labels:
+                      app: routing-sidecar
+                  spec:
+                    containers:
+                    - name: routing-sidecar
+                      args:
+                        - --port=8000
+                        - --vllm-port=8200
+                        - --connector=nixlv2
+                        - -v=5
+                      image: $SIDECAR_IMAGE
+                      imagePullPolicy: Always
+                      env:
+                        - name: SCHEDULER_HOST
+                          value: "http://scheduler:8080"
+                      ports:
+                        - containerPort: 8090
+              ---
+              apiVersion: v1
+              kind: Service
+              metadata:
+                name: routing-sidecar
+                namespace: $(params.TEST_NS)
+              spec:
+                selector:
+                  app: routing-sidecar
+                ports:
+                  - port: 8090
+                    targetPort: 8090
+              EOF
+
+    - name: test
+      runAfter: [deploy]
+      taskSpec:
+        results:
+          - name: test-output
+            description: JSON-encoded test result
+        steps:
+          - name: test
+            image: quay.io/openshift/origin-cli:latest
+            script: |
+              #!/bin/bash
+              set +e 
+              dnf -y install jq
+              echo "Running integration test..."
+
+              sleep 10
+              output=$(curl -s -X POST http://routing-sidecar:8090/inference -H "Content-Type: application/json" -d '{"input": "ping"}')
+
+              echo "Raw output: $output"
+
+              echo "$output" | grep -q '"status": "ok"'
+              if [ $? -eq 0 ]; then
+                RESULT="SUCCESS"
+              else
+                RESULT="FAILURE"
+              fi
+
+              TEST_OUTPUT=$(jq -rc --arg date "$(date -u --iso-8601=seconds)" --arg RESULT "$RESULT" --null-input \
+                              '{"result": $RESULT, "timestamp": $date, "failures": ($RESULT == "FAILURE" | if . then 1 else 0 end), "successes": ($RESULT == "SUCCESS" | if . then 1 else 0 end), "warnings": 0}')
+              echo "🔓 Decoded TEST_OUTPUT:"
+              echo "$TEST_OUTPUT"
+
+              ENCODED_OUTPUT=$(echo "$TEST_OUTPUT" | base64 -w 0)
+
+              echo "🔐 Encoded TEST_OUTPUT (base64):"
+              echo "$ENCODED_OUTPUT" | tee /tekton/results/test-output || true
+
+              exit 0
+
+    - name: cleanup
+      params:
+        - name: TEST_NS
+          value: "$(tasks.create-namespace.results.namespace)"
+      runAfter: [test]
+      taskSpec:
+        params:
+          - name: TEST_NS
+            type: string
+        steps:
+          - name: cleanup
+            image: quay.io/openshift/origin-cli:latest
+            script: |
+              echo "Cleaning up resources..."
+              # oc delete namespace "$(params.TEST_NS)" --force & disown
+              echo "Cleanup complete."
+
+    - name: evaluate-test
+      runAfter: [cleanup]
+      params:
+        - name: test-output
+          value: "$(tasks.test.results.test-output)"  # <-- assign param value here
+      taskSpec:
+        params:
+          - name: test-output
+            type: string
+        steps:
+          - name: evaluate
+            image: registry.access.redhat.com/ubi8/ubi
+            script: |
+              #!/bin/bash
+              set -e
+              dnf -y install jq
+
+              echo "Evaluating test result (base64 encoded)..."
+              echo "Encoded input: $(params.test-output)"
+
+              DECODED_JSON=$(echo "$(params.test-output)" | base64 -d)
+
+              echo "Decoded JSON:"
+              echo "$DECODED_JSON" | jq .
+
+              RESULT=$(echo "$DECODED_JSON" | jq -r '.result')
+
+              if [[ "$RESULT" == "SUCCESS" ]]; then
+                echo "Tests passed ✅"
+                exit 0
+              else
+                echo "Tests failed ❌"
+                exit 1
+              fi

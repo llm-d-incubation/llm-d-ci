@@ -1,0 +1,16 @@
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: hello-world-pipeline
+  labels:
+    build.appstudio.redhat.com/pipeline: "hello-world-1"
+spec:
+  tasks:
+    - name: say-hello
+      taskSpec:
+        steps:
+          - name: echo
+            image: busybox:1.35
+            script: |
+              #!/bin/sh
+              echo "Hello, world!"

@@ -1,0 +1,406 @@
+
+apiVersion: tekton.dev/v1beta1
+kind: Pipeline
+metadata:
+  name: remote-scheduler-routing-pipeline
+  labels:
+    build.appstudio.redhat.com/pipeline: "remote-scheduler-routing"
+spec:
+  params:
+    - name: SNAPSHOT
+      type: string
+      description: Application snapshot with components and image URLs
+    - name: remote
+      type: string
+      description: Whether to use a remote OpenShift cluster ("true" or "false")
+      default: "false"
+    - name: context-secret
+      type: string
+      description: Secret that contains base64-encoded 'token' and 'server' keys
+      default: ""
+  results:
+    - name: test-output
+      value: "$(tasks.test.results.test-output)"
+
+  tasks:
+    - name: create-namespace
+      params:
+        - name: remote
+          value: "$(params.remote)"
+        - name: context-secret
+          value: "$(params.context-secret)"
+      taskSpec:
+        params:
+          - name: remote
+          - name: context-secret
+        results:
+          - name: namespace
+            description: The temporary namespace created
+        steps:
+          - name: create
+            image: quay.io/openshift/origin-cli:latest
+            script: |
+              #!/bin/bash
+              set -e
+              dnf -y install jq
+
+              CURRENT_NS=$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace)
+
+              # Capture secrets from the local cluster BEFORE switching context
+              echo "Extracting secrets from current namespace: $CURRENT_NS"
+              mkdir /tmp/secrets
+              cd /tmp/secrets
+
+              for secret in $(oc get secrets -n $CURRENT_NS -o name); do
+                SECRET_NAME=$(echo $secret | cut -d'/' -f2)
+                oc get $secret -n $CURRENT_NS -o yaml | sed "s/namespace: .*/namespace: TEMP_NAMESPACE/" > "$SECRET_NAME.yaml"
+              done
+
+              # Log into the remote cluster if requested
+              if [[ "$(params.remote)" == "true" ]]; then
+                echo "Logging into remote cluster..."
+                SECRET_JSON=$(oc get secret "$(params.context-secret)" -n "$CURRENT_NS" -o json)
+                API_SERVER=$(echo "$SECRET_JSON" | jq -r '.data.server' | base64 -d)
+                TOKEN=$(echo "$SECRET_JSON" | jq -r '.data.token' | base64 -d)
+                oc login --token="$TOKEN" --server="$API_SERVER" --insecure-skip-tls-verify=true
+              fi
+
+              # Generate a namespace
+              NS=int-test-scheduler-routing-$(cat /dev/urandom | tr -dc 'a-z0-9' | fold -w6 | head -n1)
+              echo "Creating namespace: $NS"
+              oc create namespace $NS
+
+              # Re-apply the captured secrets into the new namespace on the (possibly remote) cluster
+              for f in /tmp/secrets/*.yaml; do
+                sed "s/namespace: TEMP_NAMESPACE/namespace: $NS/" "$f" | oc apply -n $NS -f -
+              done
+
+              # Output the namespace
+              echo -n "$NS" > $(results.namespace.path)
+
+    - name: deploy
+      runAfter: [create-namespace]
+      params:
+        - name: SNAPSHOT
+          value: "$(params.SNAPSHOT)"
+        - name: TEST_NS
+          value: "$(tasks.create-namespace.results.namespace)"
+        - name: remote
+          value: "$(params.remote)"
+        - name: context-secret
+          value: "$(params.context-secret)"
+      taskSpec:
+        params:
+          - name: SNAPSHOT
+          - name: TEST_NS
+          - name: remote
+          - name: context-secret
+        steps:
+          - name: deploy
+            image: quay.io/openshift/origin-cli:latest
+            script: |
+              #!/bin/bash
+              set -e
+              dnf -y install jq
+
+              SNAPSHOT='$(params.SNAPSHOT)'
+              echo -e "Full Snapshot JSON:\n$SNAPSHOT"
+
+              # Extract and print scheduler component info
+              SCHEDULER_COMPONENT=$(echo "$SNAPSHOT" | jq -c '.components[] | select(.name | test("inference-scheduler"))')
+              SCHEDULER_NAME=$(echo "$SCHEDULER_COMPONENT" | jq -r '.name')
+              SCHEDULER_URL=$(echo "$SCHEDULER_COMPONENT" | jq -r '.source.git.url')
+              SCHEDULER_SHA=$(echo "$SCHEDULER_COMPONENT" | jq -r '.source.git.revision')
+              SCHEDULER_IMAGE=$(echo "$SCHEDULER_COMPONENT" | jq -r '.containerImage')
+              SCHEDULER_URL_CLEAN=$(echo "$SCHEDULER_URL" | sed 's/\.git$//')
+
+              echo "Scheduler Component:"
+              echo "  Name: $SCHEDULER_NAME"
+              echo "  Repo: $SCHEDULER_URL"
+              echo "  Repo (clean): $SCHEDULER_URL_CLEAN"
+              echo "  SHA: $SCHEDULER_SHA"
+              echo "  Image: $SCHEDULER_IMAGE"
+
+              # Extract and print sidecar component info
+              SIDECAR_COMPONENT=$(echo "$SNAPSHOT" | jq -c '.components[] | select(.name | test("routing-sidecar"))')
+              SIDECAR_NAME=$(echo "$SIDECAR_COMPONENT" | jq -r '.name')
+              SIDECAR_URL=$(echo "$SIDECAR_COMPONENT" | jq -r '.source.git.url')
+              SIDECAR_SHA=$(echo "$SIDECAR_COMPONENT" | jq -r '.source.git.revision')
+              SIDECAR_IMAGE=$(echo "$SIDECAR_COMPONENT" | jq -r '.containerImage')
+              SIDECAR_URL_CLEAN=$(echo "$SIDECAR_URL" | sed 's/\.git$//')
+
+              echo "Routing Sidecar Component:"
+              echo "  Name: $SIDECAR_NAME"
+              echo "  Repo: $SIDECAR_URL"
+              echo "  Repo (clean): $SIDECAR_URL_CLEAN"
+              echo "  SHA: $SIDECAR_SHA"
+              echo "  Image: $SIDECAR_IMAGE"
+
+              SCHEDULER_IMAGE=$(echo "$SNAPSHOT" | jq -r '.components[] | select(.name | test("inference-scheduler")) | .containerImage')
+              SIDECAR_IMAGE=$(echo "$SNAPSHOT" | jq -r '.components[] | select(.name | test("routing-sidecar")) | .containerImage')
+
+              # Provide default values
+              NAMESPACE="user-ns1"
+
+              # Resolve scheduler image
+              if [[ -z "$SCHEDULER_IMAGE" || "$SCHEDULER_IMAGE" == "null" ]]; then
+                echo "Scheduler image not found in snapshot. Trying to read from component status..."
+                SCHEDULER_IMAGE=$(oc get component llm-d-inference-scheduler -n "$NAMESPACE" -o json | jq -r '.status.lastPromotedImage')
+              fi
+
+              # Resolve sidecar image
+              if [[ -z "$SIDECAR_IMAGE" || "$SIDECAR_IMAGE" == "null" ]]; then
+                echo "Sidecar image not found in snapshot. Trying to read from component status..."
+                SIDECAR_IMAGE=$(oc get component llm-d-routing-sidecar -n "$NAMESPACE" -o json | jq -r '.status.lastPromotedImage')
+              fi
+
+              CURRENT_NS=$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace)
+              if [[ "$(params.remote)" == "true" ]]; then
+                echo "Logging into remote cluster..."
+                SECRET_JSON=$(oc get secret "$(params.context-secret)" -n "$CURRENT_NS" -o json)
+                API_SERVER=$(echo "$SECRET_JSON" | jq -r '.data.server' | base64 -d)
+                TOKEN=$(echo "$SECRET_JSON" | jq -r '.data.token' | base64 -d)
+                oc login --token="$TOKEN" --server="$API_SERVER" --insecure-skip-tls-verify=true
+              fi
+
+              echo "Performing deployment to $(params.TEST_NS) on $API_SERVER"
+
+              echo "Deploying with:"
+              echo "  Scheduler Image: $SCHEDULER_IMAGE"
+              echo "  Sidecar Image: $SIDECAR_IMAGE"
+
+              oc apply -f - <<EOF
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: scheduler
+                namespace: $(params.TEST_NS)
+              spec:
+                replicas: 1
+                selector:
+                  matchLabels:
+                    app: scheduler
+                template:
+                  metadata:
+                    labels:
+                      app: scheduler
+                  spec:
+                    containers:
+                    - name: scheduler
+                      args:
+                      - --poolName
+                      - ms-llm-d-modelservice
+                      - --poolNamespace
+                      - default
+                      - -v
+                      - "4"
+                      - --zap-encoder
+                      - json
+                      - --grpcPort
+                      - "9002"
+                      - --grpcHealthPort
+                      - "9003"
+                      image: $SCHEDULER_IMAGE
+                      ports:
+                      - containerPort: 9002
+                        name: grpc
+                        protocol: TCP
+                      - containerPort: 9003
+                        name: grpc-health
+                        protocol: TCP
+                      - containerPort: 9090
+                        name: metrics
+                        protocol: TCP
+                      readinessProbe:
+                        grpc:
+                          port: 9003
+                          service: envoy.service.ext_proc.v3.ExternalProcessor
+                        initialDelaySeconds: 5
+                        timeoutSeconds: 1
+                        periodSeconds: 10
+                        successThreshold: 1
+                        failureThreshold: 3
+                      livenessProbe:
+                        grpc:
+                          port: 9003
+                          service: envoy.service.ext_proc.v3.ExternalProcessor
+                        initialDelaySeconds: 5
+                        timeoutSeconds: 1
+                        periodSeconds: 10
+                        successThreshold: 1
+                        failureThreshold: 3
+              ---
+              apiVersion: v1
+              kind: Service
+              metadata:
+                name: scheduler
+                namespace: $(params.TEST_NS)
+              spec:
+                selector:
+                  app: scheduler
+                ports:
+                  - port: 8080
+                    targetPort: 8080
+              ---
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: routing-sidecar
+                namespace: $(params.TEST_NS)
+              spec:
+                replicas: 1
+                selector:
+                  matchLabels:
+                    app: routing-sidecar
+                template:
+                  metadata:
+                    labels:
+                      app: routing-sidecar
+                  spec:
+                    containers:
+                    - name: routing-sidecar
+                      args:
+                        - --port=8000
+                        - --vllm-port=8200
+                        - --connector=nixlv2
+                        - -v=5
+                      image: $SIDECAR_IMAGE
+                      imagePullPolicy: Always
+                      env:
+                        - name: SCHEDULER_HOST
+                          value: "http://scheduler:8080"
+                      ports:
+                        - containerPort: 8090
+              ---
+              apiVersion: v1
+              kind: Service
+              metadata:
+                name: routing-sidecar
+                namespace: $(params.TEST_NS)
+              spec:
+                selector:
+                  app: routing-sidecar
+                ports:
+                  - port: 8090
+                    targetPort: 8090
+              EOF
+
+    - name: test
+      runAfter: [deploy]
+      params:
+        - name: remote
+          value: "$(params.remote)"
+        - name: context-secret
+          value: "$(params.context-secret)"
+      taskSpec:
+        params:
+          - name: remote
+          - name: context-secret
+        results:
+          - name: test-output
+            description: JSON-encoded test result
+        steps:
+          - name: test
+            image: quay.io/openshift/origin-cli:latest
+            script: |
+              #!/bin/bash
+              set +e
+              dnf -y install jq
+
+              CURRENT_NS=$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace)
+              if [[ "$(params.remote)" == "true" ]]; then
+                echo "Logging into remote cluster..."
+                SECRET_JSON=$(oc get secret "$(params.context-secret)" -n "$CURRENT_NS" -o json)
+                API_SERVER=$(echo "$SECRET_JSON" | jq -r '.data.server' | base64 -d)
+                TOKEN=$(echo "$SECRET_JSON" | jq -r '.data.token' | base64 -d)
+                oc login --token="$TOKEN" --server="$API_SERVER" --insecure-skip-tls-verify=true
+              fi
+
+              echo "Testing routing-sidecar..."
+
+              sleep 10
+              output=$(curl -s -X POST http://routing-sidecar:8090/inference -H "Content-Type: application/json" -d '{"input": "ping"}')
+              RESULT=$(echo "$output" | grep -q '"status": "ok"' && echo "SUCCESS" || echo "FAILURE")
+
+              TEST_OUTPUT=$(jq -rc --arg date "$(date -u --iso-8601=seconds)" --arg RESULT "$RESULT" --null-input \
+                              '{"result": $RESULT, "timestamp": $date, "failures": ($RESULT == "FAILURE" | if . then 1 else 0 end), "successes": ($RESULT == "SUCCESS" | if . then 1 else 0 end), "warnings": 0}')
+              echo "🔓 Decoded TEST_OUTPUT:"
+              echo "$TEST_OUTPUT"
+
+              ENCODED_OUTPUT=$(echo "$TEST_OUTPUT" | base64 -w 0)
+
+              echo "🔐 Encoded TEST_OUTPUT (base64):"
+              echo "$ENCODED_OUTPUT" | tee /tekton/results/test-output || true
+
+              exit 0
+
+    - name: cleanup
+      runAfter: [test]
+      params:
+        - name: TEST_NS
+          value: "$(tasks.create-namespace.results.namespace)"
+        - name: remote
+          value: "$(params.remote)"
+        - name: context-secret
+          value: "$(params.context-secret)"
+      taskSpec:
+        params:
+          - name: TEST_NS
+          - name: remote
+          - name: context-secret
+        steps:
+          - name: cleanup
+            image: quay.io/openshift/origin-cli:latest
+            script: |
+              #!/bin/bash
+              set -e
+              dnf -y install jq
+
+              # CURRENT_NS=$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace)
+              # if [[ "$(params.remote)" == "true" ]]; then
+              #   echo "Logging into remote cluster..."
+              #   SECRET_JSON=$(oc get secret "$(params.context-secret)" -n "$CURRENT_NS" -o json)
+              #   API_SERVER=$(echo "$SECRET_JSON" | jq -r '.data.server' | base64 -d)
+              #   TOKEN=$(echo "$SECRET_JSON" | jq -r '.data.token' | base64 -d)
+              #   oc login --token="$TOKEN" --server="$API_SERVER" --insecure-skip-tls-verify=true
+              # fi
+
+              # echo "Cleaning up resources..."
+              # oc delete namespace "$(params.TEST_NS)" --force & disown
+              # # oc delete deployment scheduler routing-sidecar || true
+              # # oc delete service scheduler routing-sidecar || true
+              # echo "Cleanup complete."
+
+    - name: evaluate-test
+      runAfter: [cleanup]
+      params:
+        - name: test-output
+          value: "$(tasks.test.results.test-output)"
+      taskSpec:
+        params:
+          - name: test-output
+        steps:
+          - name: evaluate
+            image: registry.access.redhat.com/ubi8/ubi
+            script: |
+              #!/bin/bash
+              set -e
+              dnf -y install jq
+
+              echo "Evaluating test result (base64 encoded)..."
+              echo "Encoded input: $(params.test-output)"
+
+              DECODED_JSON=$(echo "$(params.test-output)" | base64 -d)
+
+              echo "Decoded JSON:"
+              echo "$DECODED_JSON" | jq .
+
+              RESULT=$(echo "$DECODED_JSON" | jq -r '.result')
+
+              if [[ "$RESULT" == "SUCCESS" ]]; then
+                echo "Tests passed ✅"
+                exit 0
+              else
+                echo "Tests failed ❌"
+                exit 1
+              fi
