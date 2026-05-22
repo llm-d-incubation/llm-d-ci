@@ -33,7 +33,7 @@ spec:
   params:
     - name: GITHUB_HOST_URL
       description: |
-        The GitHub host, adjust this if you run a GitHub enteprise.
+        The GitHub host, adjust this if you run a GitHub enterprise.
       default: "api.github.com"
       type: string
 
